@@ -1,0 +1,178 @@
+version: '3.3'
+services:
+
+
+  auth_service:
+    build: ./authentication_service
+    container_name: auth_service_1
+    ports:
+      - '0.0.0.0:5050:5050'
+    command: |
+      sh -c "python manage.py runserver -p 5050 -h 0.0.0.0"
+    depends_on:
+      - auth_redis
+    networks:
+      - auth
+      - authenticate
+    environment:
+      - DB_HOST=auth_redis
+
+
+  calc_service:
+    build: ./calculation_service
+    container_name: calc_service
+    ports:
+      - '0.0.0.0:5100:5100'
+    depends_on:
+      - calc_db
+      - cal_rabbit
+    networks:
+      - cal
+    command: |
+      sh -c "python manage.py runserver -h 0.0.0.0 -p 5100"
+
+
+  etl_service:
+    build: ./etl_service
+    container_name: etl_service
+    ports:
+      - '0.0.0.0:6200:6200'
+    depends_on:
+      - etl_rabbit
+    networks:
+      - etl
+    command: |
+      sh -c "python manage.py runserver -h 0.0.0.0 -p 6200"
+    environment:
+      - PROJECTS_URI=http://pr_service:6300/projects/{uuid}
+    volumes:
+      - etl_volume:/service/uploads
+
+  worker:
+    build: ./etl_service
+    command: ["celery", "worker", "-A", "app.celery_proj.celery", "-E", "--loglevel=INFO"]
+    depends_on:
+      - etl_service
+    networks:
+      - etl
+      - data_send
+    volumes:
+      - etl_volume:/service/uploads
+
+
+  flower:
+    build: ./etl_service
+    command: ['celery', 'flower', '-A', 'app.celery_proj.celery']
+    ports:
+      - '5555:5555'
+    depends_on:
+      - etl_rabbit
+    networks:
+      - etl
+
+
+  contract_service:
+    build: ./contracts_service
+    container_name: contract_service
+    ports:
+      - '0.0.0.0:5000:5000'
+    command: |
+      sh -c "python manage.py runserver -h 0.0.0.0 -p 5000"
+    depends_on:
+      - contract_db
+    networks:
+      - contracts
+    environment:
+      - DB_HOST=contract_db
+      - DEFAULT_DB=postgres
+
+
+  pr_service:
+    build: ./projects_service
+    container_name: pr_service
+    ports:
+      - '0.0.0.0:6300:6300'
+    depends_on:
+      - pr_db
+    networks:
+      - projects
+      - data_send
+    command: |
+      sh -c "python manage.py init_db && python manage.py runserver -h 0.0.0.0 -p 6300"
+    environment:
+      - DB_HOST=pr_db
+      - DB_USER=postgres
+
+
+
+  users_service:
+    build: ./users_service
+    container_name: users_service
+    ports:
+      - '0.0.0.0:6400:6400'
+    command: |
+      sh -c "python manage.py init_db &&  python manage.py runserver -h 0.0.0.0 -p 6400"
+    depends_on:
+      - user_db
+    networks:
+      - users
+      - authenticate
+
+
+  auth_redis:
+    image: redis
+    networks:
+      - auth
+
+
+  etl_rabbit:
+    image: rabbitmq
+    networks:
+      - etl
+
+
+  cal_rabbit:
+    image: rabbitmq
+    networks:
+      - cal
+
+
+  user_db:
+    image: postgres
+    networks:
+      - users
+
+
+  contract_db:
+    image: postgres
+    networks:
+      - contracts
+
+
+  pr_db:
+    image: postgres
+    networks:
+      - projects
+
+
+  calc_db:
+    image: postgres
+    networks:
+      - cal
+
+
+networks:
+  users: null
+  auth: null
+  cal: null
+  etl: null
+  projects: null
+  contracts: null
+  authenticate: null
+  data_send: null
+
+volumes:
+  etl_volume:
+    driver: local
+  etl_parser_volume:
+    driver: local
